@@ -27,6 +27,14 @@ class TurnType(str, Enum):
     CLOSING = "closing"
 
 
+class TokenUsage(BaseModel):
+    """Token usage information for a message."""
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+    model: str = Field(default="")
+
+
 class DebateMessage(BaseModel):
     """A single message in the debate."""
     role: DebaterRole
@@ -35,6 +43,7 @@ class DebateMessage(BaseModel):
     turn_number: int
     timestamp: datetime = Field(default_factory=datetime.now)
     audio_duration: Optional[float] = None  # Duration in seconds when TTS is complete
+    token_usage: Optional[TokenUsage] = None  # Token usage for this message
 
 
 class DebateConfig(BaseModel):
@@ -44,6 +53,11 @@ class DebateConfig(BaseModel):
     position_b: str = Field(..., description="Position that Debater B will defend")
     max_turns: int = Field(default=8, ge=4, le=20, description="Maximum number of turns per debater")
     format: DebateFormat = Field(default=DebateFormat.CLASSIC)
+    
+    # Auto-advance Configuration
+    auto_advance: bool = Field(default=False, description="Automatically advance through debate turns")
+    turn_delay: float = Field(default=3.0, ge=0.5, le=10.0, description="Seconds to wait between turns in auto-advance mode")
+    wait_for_audio: bool = Field(default=True, description="Wait for audio to finish before advancing")
     
     # AI Configuration
     model: str = Field(default="gpt-4o")
@@ -64,6 +78,16 @@ class DebateState(BaseModel):
     is_active: bool = Field(default=False)
     is_complete: bool = Field(default=False)
     
+    # Auto-advance state
+    auto_advance_active: bool = Field(default=False)
+    auto_advance_paused: bool = Field(default=False)
+    last_turn_timestamp: Optional[datetime] = None
+    
+    # Token usage tracking
+    total_input_tokens: int = Field(default=0)
+    total_output_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+    
     def get_current_turn_type(self) -> TurnType:
         """Determine the current turn type based on turn number."""
         if self.current_turn <= 2:
@@ -81,23 +105,48 @@ class DebateState(BaseModel):
             self.current_role = DebaterRole.DEBATER_A
             self.current_turn += 1
     
-    def add_message(self, content: str, audio_duration: Optional[float] = None) -> None:
+    def add_message(
+        self, 
+        content: str, 
+        audio_duration: Optional[float] = None,
+        token_usage: Optional[TokenUsage] = None
+    ) -> None:
         """Add a new message to the debate."""
         message = DebateMessage(
             role=self.current_role,
             content=content,
             turn_type=self.get_current_turn_type(),
             turn_number=self.current_turn,
-            audio_duration=audio_duration
+            audio_duration=audio_duration,
+            token_usage=token_usage
         )
         self.messages.append(message)
         
-        # Check if debate is complete
-        if self.current_turn >= self.config.max_turns:
+        # Update total token usage
+        if token_usage:
+            self.total_input_tokens += token_usage.input_tokens
+            self.total_output_tokens += token_usage.output_tokens
+            self.total_tokens += token_usage.total_tokens
+        
+        # Switch to next debater
+        self.switch_debater()
+        
+        # Check if debate is complete (after switching debater)
+        # Total messages should be max_turns * 2 (each debater gets max_turns)
+        if len(self.messages) >= self.config.max_turns * 2:
             self.is_complete = True
             self.is_active = False
-        else:
-            self.switch_debater()
+            
+            # Log total token usage for completed debate
+            from ..utils.logger import get_logger
+            logger = get_logger()
+            logger.info("Debate completed", 
+                       topic=self.config.topic,
+                       total_turns=len(self.messages),
+                       total_input_tokens=self.total_input_tokens,
+                       total_output_tokens=self.total_output_tokens,
+                       total_tokens=self.total_tokens,
+                       model=self.config.model)
     
     def get_messages_for_role(self, role: DebaterRole) -> List[DebateMessage]:
         """Get all messages from a specific debater."""

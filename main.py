@@ -2,14 +2,13 @@
 
 import streamlit as st
 import asyncio
-from typing import Optional
+import time
 from datetime import datetime
 
 from src.debate.controller import DebateController
-from src.debate.models import DebateConfig, DebateState
 from src.ui.components import DebateUI
 from src.utils.logger import get_logger
-from src.utils.errors import BattleOfWitsError, ConfigurationError
+from src.utils.errors import BattleOfWitsError
 from src.ai.client import get_openai_client
 
 # Initialize logger
@@ -37,111 +36,70 @@ if 'current_audio' not in st.session_state:
 if 'system_status' not in st.session_state:
     st.session_state.system_status = {}
 
-
-def run_single_debate_turn():
-    """Run a single turn of the debate synchronously."""
-    controller = st.session_state.debate_controller
-    
-    if not controller.state or not controller.state.is_active or controller.state.is_complete:
-        return
-    
-    try:
-        # Get current debater
-        from src.ai.debater import AIDebater
-        from src.debate.models import DebaterRole
-        
-        current_debater = (
-            controller.debater_a if controller.state.current_role == DebaterRole.DEBATER_A 
-            else controller.debater_b
-        )
-        
-        # Generate AI response synchronously using asyncio.run
-        logger.info("Generating AI response", 
-                   debater=controller.state.current_role.value,
-                   turn=controller.state.current_turn)
-        
-        response_text = asyncio.run(current_debater.generate_response(controller.state))
-        
-        # Add message to state (this automatically switches to next debater)
-        controller.state.add_message(response_text)
-        
-        logger.info("AI response generated successfully", 
-                   debater=controller.state.current_role.value,
-                   response_length=len(response_text))
-        
-        # Generate audio in background (simplified for now)
-        voice = (
-            controller.state.config.tts_voice_a if controller.state.current_role == DebaterRole.DEBATER_B
-            else controller.state.config.tts_voice_b
-        )
-        
-        try:
-            audio_data = asyncio.run(controller.audio_manager.generate_audio(response_text, voice))
-            st.session_state.current_audio = audio_data
-        except Exception as audio_error:
-            logger.error("Audio generation failed", error=audio_error)
-            # Continue without audio
-        
-        return True
-        
-    except Exception as e:
-        logger.error("Error during debate turn", error=e)
-        DebateUI.render_error_message(e)
-        controller.stop_debate()
-        return False
+if 'auto_advance_timer' not in st.session_state:
+    st.session_state.auto_advance_timer = None
 
 
 async def check_system_status():
     """Check and update system status."""
     logger.info("Checking system status")
-    
+
     status = {
         'last_check': datetime.now().strftime('%H:%M:%S'),
         'env_configured': False,
         'api_connected': False
     }
-    
+
     try:
         # Test OpenAI client initialization and connection
         client = get_openai_client()
         status['env_configured'] = True
-        
+
         # Test API connection (this might be slow, so we'll make it optional)
         status['api_connected'] = await client.test_connection()
-        
+
     except Exception as e:
         logger.error("System status check failed", error=e)
         status['error'] = str(e)
-    
+
     st.session_state.system_status = status
     return status
 
 
 def main():
     """Main application function."""
-    logger.info("Starting Battle of Wits application")
-    
+    # Only log startup message once per session
+    if 'app_started' not in st.session_state:
+        logger.info("Starting Battle of Wits application")
+        st.session_state.app_started = True
+
     # System status check
     DebateUI.render_system_status()
-    
+
     # Check system status if not recently checked
     if not st.session_state.system_status.get('last_check'):
         with st.spinner("Checking system status..."):
             asyncio.run(check_system_status())
-    
+
     controller = st.session_state.debate_controller
-    
-    # If no active debate, show setup form
-    if not controller.state or not controller.state.is_active:
+
+    # Show setup form only if no debate state or explicitly restarted
+    # Completed debates should stay visible with completion UI
+    if not controller.state or (not controller.state.is_active and not controller.state.is_complete):
         config = DebateUI.render_setup_form()
-        
+
         if config:
             # Initialize new debate
             try:
-                logger.info("Initializing new debate", topic=config.topic)
+                logger.info("Initializing new debate", topic=config.topic, auto_advance=config.auto_advance)
                 state = controller.initialize_debate(config)
+
+                # Initialize manual mode
+                logger.info("Manual mode enabled - user controls advancement")
+
                 st.session_state.debate_active = True
-                st.success("✅ Debate initialized! Starting now...")
+                st.success("✅ Debate initialized! Click 'Next Turn' to begin.")
+
                 logger.info("Debate initialized successfully")
                 st.rerun()
             except BattleOfWitsError as e:
@@ -152,65 +110,114 @@ def main():
                 logger.error("Unexpected error initializing debate", error=e)
                 DebateUI.render_error_message(e)
                 return
-    
+
     else:
         # Active debate - show debate interface
         state = controller.state
-        
+
         # Render debate header
         DebateUI.render_debate_header(state)
-        
+
+        # Handle manual presentation advancement - no auto-advance needed
+
         # Create layout
         col1, col2 = st.columns([2, 1])
-        
+
         with col1:
             # Main debate area
             DebateUI.render_current_speaker(state)
-            
-            # Auto-advance debate turns
+
+            # Show status messages
             if state.is_active and not state.is_complete:
-                # Auto-run first turn or show manual controls
-                if len(state.messages) == 0:
-                    # Automatically start the first turn
-                    with st.spinner(f"AI is thinking... ({state.get_current_turn_type().value})"):
-                        if run_single_debate_turn():
-                            st.rerun()
+                if controller.has_ready_content():
+                    st.success("✅ Next turn ready! Click 'Next Turn' to continue.")
+                elif len(state.messages) == 0:
+                    st.info("🚀 Debate starting - generating first response...")
                 else:
-                    # Manual turn advancement for subsequent turns
-                    if st.button("▶️ Next Turn", key=f"turn_{len(state.messages)}"):
-                        with st.spinner(f"AI is thinking... ({state.get_current_turn_type().value})"):
-                            if run_single_debate_turn():
-                                st.rerun()
-            
+                    st.info("⏳ Generating next response in background...")
+
             # Show completion message
             if state.is_complete:
                 DebateUI.render_completion_message(state)
-            
-            # Debate controls
-            controls = DebateUI.render_debate_controls(state)
-            
-            if controls.get('stop'):
-                controller.stop_debate()
-                st.session_state.debate_active = False
-                st.rerun()
-            
-            if controls.get('restart'):
-                # Reset for new debate
-                st.session_state.debate_controller = DebateController()
-                st.session_state.debate_active = False
-                st.session_state.current_audio = None
-                st.rerun()
-        
+
+            # Debate controls (pass ready content status for better UX)
+            has_ready = controller.has_ready_content() if controller else False
+            controls = DebateUI.render_debate_controls(state, has_ready_content=has_ready)
+
         with col2:
             # Transcript
             DebateUI.render_transcript(state.messages)
-            
-            # Audio player for the most recent message
-            if st.session_state.current_audio and len(state.messages) > 0:
+
+            # Audio player for the current presentation
+            current_audio = controller.get_current_audio()
+            session_audio = st.session_state.get('current_audio')
+
+            # Audio availability check
+
+            if current_audio and len(state.messages) > 0:
                 last_message = state.messages[-1]
                 debater_name = "Debater A" if last_message.role.value == "debater_a" else "Debater B"
                 st.subheader(f"🔊 {debater_name} Audio")
-                DebateUI.render_audio_player(st.session_state.current_audio)
+                DebateUI.render_audio_player(current_audio)
+            elif session_audio and len(state.messages) > 0:
+                # Fallback to session audio if available
+                last_message = state.messages[-1]
+                debater_name = "Debater A" if last_message.role.value == "debater_a" else "Debater B"
+                st.subheader(f"🔊 {debater_name} Audio (Session)")
+                DebateUI.render_audio_player(session_audio)
+            else:
+                st.info("🔇 No audio available yet")
+
+        # Handle control actions AFTER both columns are rendered
+        if controls.get('next_turn'):
+            # Manual advance to next turn
+            if controller.has_ready_content():
+                audio_data = controller.try_advance_presentation()
+                if audio_data:
+                    st.session_state.current_audio = audio_data
+                    logger.info("Manual presentation advanced",
+                               audio_size=len(audio_data),
+                               total_messages=len(state.messages),
+                               debate_complete=state.is_complete)
+                    st.rerun()
+                else:
+                    st.error("❌ Error advancing presentation - please try again")
+                    st.rerun()
+            else:
+                st.warning("⏳ Next turn is still being generated, please wait...")
+                time.sleep(1.0)  # Give more time for generation
+                st.rerun()
+
+        if controls.get('stop'):
+            controller.stop_debate()
+            st.session_state.debate_active = False
+            st.rerun()
+
+        if controls.get('restart'):
+            # Reset for new debate
+            st.session_state.debate_controller = DebateController()
+            st.session_state.debate_active = False
+            st.session_state.current_audio = None
+            st.rerun()
+
+        # Auto-start first turn if no messages yet
+        if state.is_active and not state.is_complete and len(state.messages) == 0:
+            has_content = controller.has_ready_content()
+            
+            if has_content:
+                audio_data = controller.try_advance_presentation()
+                if audio_data:
+                    st.session_state.current_audio = audio_data
+                    logger.info("Auto-started first turn",
+                               audio_size=len(audio_data),
+                               total_messages=len(state.messages))
+                    st.rerun()
+                else:
+                    logger.warning("has_ready_content was True but try_advance_presentation returned None")
+            else:
+                # Trigger a rerun to check again soon
+                time.sleep(0.5)
+                st.rerun()
 
 
 if __name__ == "__main__":

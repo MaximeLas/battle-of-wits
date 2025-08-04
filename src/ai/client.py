@@ -77,9 +77,31 @@ class OpenAIClient:
         
         try:
             response = await self.client.chat.completions.create(**kwargs)
+            # Calculate cost
+            cost_info = ""
+            if response.usage:
+                model = kwargs.get('model', '')
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                
+                if model == "gpt-4o":
+                    input_cost = input_tokens * 0.0025 / 1000  # $2.50 per 1K input tokens
+                    output_cost = output_tokens * 0.01 / 1000  # $10.00 per 1K output tokens
+                elif "gpt-4o-mini" in model:
+                    input_cost = input_tokens * 0.00015 / 1000  # $0.15 per 1K input tokens
+                    output_cost = output_tokens * 0.0006 / 1000  # $0.60 per 1K output tokens
+                else:
+                    input_cost = output_cost = 0
+                
+                total_cost = input_cost + output_cost
+                cost_info = f"${total_cost:.4f}"
+            
             logger.info("Chat completion successful", 
                        model=kwargs.get('model'), 
-                       tokens_used=response.usage.total_tokens if response.usage else 'unknown')
+                       input_tokens=response.usage.prompt_tokens if response.usage else 'unknown',
+                       output_tokens=response.usage.completion_tokens if response.usage else 'unknown',
+                       total_tokens=response.usage.total_tokens if response.usage else 'unknown',
+                       estimated_cost=cost_info if cost_info else 'unknown')
             return response
             
         except Exception as e:
@@ -91,16 +113,33 @@ class OpenAIClient:
     
     async def create_speech(self, **kwargs):
         """Create speech with comprehensive error handling."""
+        text_input = kwargs.get('input', '')
+        text_length = len(text_input)
+        
         logger.debug("Creating speech", 
                     model=kwargs.get('model'), 
                     voice=kwargs.get('voice'),
-                    text_length=len(kwargs.get('input', '')))
+                    text_length=text_length)
         
         try:
             response = await self.client.audio.speech.create(**kwargs)
+            
+            # Calculate TTS cost based on characters (TTS pricing is per 1K characters)
+            model = kwargs.get('model', '')
+            if model == "tts-1":
+                cost_per_1k_chars = 0.015  # $0.015 per 1K characters for tts-1
+            elif model == "tts-1-hd":
+                cost_per_1k_chars = 0.030  # $0.030 per 1K characters for tts-1-hd
+            else:
+                cost_per_1k_chars = 0.015  # Default to tts-1 pricing
+            
+            estimated_cost = (text_length / 1000) * cost_per_1k_chars
+            
             logger.info("Speech generation successful", 
                        model=kwargs.get('model'),
-                       voice=kwargs.get('voice'))
+                       voice=kwargs.get('voice'),
+                       characters=text_length,
+                       estimated_cost=f"${estimated_cost:.4f}")
             return response
             
         except Exception as e:

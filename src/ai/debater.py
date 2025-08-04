@@ -1,7 +1,7 @@
 """AI debater that generates contextual responses for debate turns."""
 
-from typing import Optional
-from ..debate.models import DebaterRole, DebateState, DebateConfig
+from typing import Optional, Tuple
+from ..debate.models import DebaterRole, DebateState, DebateConfig, TokenUsage
 from .client import get_openai_client
 from .prompts import PromptTemplates
 
@@ -22,7 +22,7 @@ class AIDebater:
         self.config = config
         self.client = get_openai_client()
     
-    async def generate_response(self, state: DebateState) -> str:
+    async def generate_response(self, state: DebateState) -> Tuple[str, TokenUsage]:
         """Generate a contextual response based on current debate state."""
         # Generate messages for this debater
         messages = PromptTemplates.generate_conversation_messages(self.role, state)
@@ -41,12 +41,28 @@ class AIDebater:
             if not content:
                 raise ValueError("Empty response from OpenAI")
             
-            return content.strip()
+            # Extract token usage
+            usage = response.usage
+            token_usage = TokenUsage(
+                input_tokens=usage.prompt_tokens if usage else 0,
+                output_tokens=usage.completion_tokens if usage else 0,
+                total_tokens=usage.total_tokens if usage else 0,
+                model=self.config.model
+            )
+            
+            return content.strip(), token_usage
             
         except Exception as e:
             # Fallback response in case of API issues
             print(f"Error generating response for {self.role}: {e}")
-            return self._get_fallback_response(state)
+            fallback_text = self._get_fallback_response(state)
+            fallback_usage = TokenUsage(
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                model=self.config.model
+            )
+            return fallback_text, fallback_usage
     
     def _get_fallback_response(self, state: DebateState) -> str:
         """Generate a fallback response when API fails."""
