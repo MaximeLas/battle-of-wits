@@ -1,28 +1,61 @@
-# 🧠 Battle of Wits
+# 🥊 Battle of Wits
 
-**Battle of Wits** is an open-source tool where two AI agents engage in structured, multi-turn debates — with real-time voice output.
+**Battle of Wits** is an open-source tool where two AI agents engage in structured, multi-turn debates with real-time voice output.
 
-You pick the topic, define each side's stance, and the AIs take it from there. Whether you want a formal exchange or a more casual argument, this tool brings intelligent sparring to life.
-
----
-
-## 🔑 Features
-
-- 🗣️ Real-time AI voice output using OpenAI’s API  
-- 🔄 Structured multi-turn debates with customizable stances  
-- 🎭 Configurable tone and debate format (formal or casual)  
-- 📄 Transcript view (text + voice)
+Pick a topic, define each debater's position, and watch as AI agents argue intelligently with full audio narration. Perfect for exploring complex topics from multiple perspectives.
 
 ---
 
-## 📦 Getting Started
+## ✨ Features
+
+- 🗣️ **Real-time voice debates** using OpenAI TTS with different voices per debater
+- 🔄 **Structured multi-turn format** with opening statements, rebuttals, and closing arguments  
+- 🎭 **Smart context-aware AI** that stays in character and builds on previous arguments
+- 📄 **Live transcript** showing the complete debate as it unfolds
+- ⚙️ **Configurable parameters** including turn limits, speech speed, and AI models
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- OpenAI API key
+
+### Installation
 
 ```bash
 git clone https://github.com/MaximeLas/battle-of-wits.git
 cd battle-of-wits
 pip install -r requirements.txt
-streamlit run ui/app.py
 ```
+
+### Setup
+1. Copy the environment template:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Add your OpenAI API key to `.env`:
+   ```
+   OPENAI_API_KEY=your_api_key_here
+   ```
+
+3. Test the setup:
+   ```bash
+   python test_setup.py
+   ```
+
+4. Launch the application:
+   ```bash
+   streamlit run main.py
+   ```
+
+### Usage
+1. Enter your debate topic (e.g., "Artificial Intelligence will benefit humanity")
+2. Define Position A and Position B 
+3. Adjust settings like number of turns and voices
+4. Click "🚀 Start Debate" and listen!
 
 ---
 
