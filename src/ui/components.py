@@ -171,8 +171,8 @@ class DebateUI:
         current_debater = "Debater A 🔵" if state.current_role.value == "debater_a" else "Debater B 🔴"
         turn_type = state.get_current_turn_type().value.title()
         
-        st.markdown(f"**Next Speaker:** {current_debater}")
-        st.markdown(f"**Turn Type:** {turn_type}")
+        # Condensed speaker info in single line
+        st.markdown(f"**Next:** {current_debater} • {turn_type}")
         
         # Show debate statistics
         if state.config.auto_advance:
@@ -189,25 +189,11 @@ class DebateUI:
                 else:
                     st.metric("Auto Mode", "▶️ Running")
         else:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Messages", len(state.messages))
-            with col2:
-                st.metric("Current Turn", state.current_turn)
-            with col3:
-                st.metric("Remaining", state.config.max_turns - state.current_turn + 1)
+            # Compact turn statistics in single line
+            st.markdown(f"📊 **Progress:** Turn {state.current_turn} of {state.config.max_turns} • {len(state.messages)} messages • {state.config.max_turns - state.current_turn + 1} remaining")
         
-        # Token usage display
+        # Compact token usage display
         if state.total_tokens > 0:
-            st.markdown("**Token Usage**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Input Tokens", f"{state.total_input_tokens:,}")
-            with col2:
-                st.metric("Output Tokens", f"{state.total_output_tokens:,}")
-            with col3:
-                st.metric("Total Tokens", f"{state.total_tokens:,}")
-            
             # Cost estimation (approximate)
             if state.config.model == "gpt-4o":
                 input_cost = state.total_input_tokens * 0.0025 / 1000  # $2.50 per 1K input tokens
@@ -217,7 +203,8 @@ class DebateUI:
                 output_cost = state.total_output_tokens * 0.0006 / 1000  # $0.60 per 1K output tokens
             
             total_cost = input_cost + output_cost
-            st.caption(f"💰 Estimated cost: ${total_cost:.4f} (Input: ${input_cost:.4f} + Output: ${output_cost:.4f})")
+            st.markdown(f"🪙 **Tokens:** {state.total_input_tokens:,} input • {state.total_output_tokens:,} output • {state.total_tokens:,} total")
+            st.caption(f"💰 Cost: ${total_cost:.4f}")
     
     @staticmethod
     def render_transcript(messages: List[DebateMessage]) -> None:
@@ -290,7 +277,7 @@ class DebateUI:
                     controls['next_turn'] = st.button("➡️ Next Turn", type="primary", use_container_width=True)
                 else:
                     # Show disabled button but still capture clicks for feedback
-                    disabled_clicked = st.button("⏳ Generating...", type="secondary", use_container_width=True, disabled=True)
+                    st.button("⏳ Generating...", type="secondary", use_container_width=True, disabled=True)
                     if st.button("🔄 Check Again", type="secondary", use_container_width=True, key="check_ready"):
                         controls['next_turn'] = True  # This will trigger the feedback message
             

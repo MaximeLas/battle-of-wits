@@ -120,8 +120,13 @@ def main():
 
         # Handle manual presentation advancement - no auto-advance needed
 
-        # Create layout
-        col1, col2 = st.columns([2, 1])
+        # Create dynamic layout based on transcript content
+        if len(state.messages) > 0:
+            # More space for transcript when there's content
+            col1, col2 = st.columns([1, 2])
+        else:
+            # More space for controls when transcript is empty
+            col1, col2 = st.columns([2, 1])
 
         with col1:
             # Main debate area
